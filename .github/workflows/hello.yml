@@ -1,16 +1,73 @@
 
-name: Hello World PHP
+name: PEviitor PHP si Solr
 
 on:
   workflow_dispatch:
 
 jobs:
-  hello:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descarca codul
-        uses: actions/checkout@v4
+      - name: Instaleaza PHP
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-curl
+          php -v
 
-      - name: Ruleaza PHP
-        run: php hello.php
+      - name: Descarca API PEviitor
+        run: |
+          git clone --depth 1 \
+            https://github.com/peviitor-ro/api.git api
+
+          ls -la api
+
+      - name: Verifica PHP
+        run: |
+          php -l api/util/solr.php
+          php -l api/util/loadEnv.php
+
+      - name: Porneste Apache Solr
+        run: |
+          docker run -d \
+            --name solr \
+            -p 127.0.0.1:8983:8983 \
+            solr:9 solr-precreate job
+
+          for i in {1..60}; do
+            if curl -fsS \
+              http://localhost:8983/solr/admin/info/system \
+              > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          docker exec solr solr create_core -c company
+
+      - name: Configureaza conexiunea
+        run: |
+          cat > api.env <<'EOF'
+          LOCAL_SERVER=localhost:8983
+          SOLR_SERVER=localhost:8983
+          SOLR_USER=
+          SOLR_PASS=
+          EOF
+
+      - name: Porneste PHP
+        run: |
+          php -S 127.0.0.1:8000 -t api \
+            > /tmp/php.log 2>&1 &
+
+      - name: Testeaza serviciile
+        run: |
+          curl -f \
+            "http://localhost:8983/solr/admin/cores?action=STATUS&core=job"
+
+          curl -f \
+            "http://localhost:8983/solr/admin/cores?action=STATUS&core=company"
+
+          curl -f \
+            "http://localhost:8000/"
+
+          echo "Testele de baza au trecut!"
